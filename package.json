@@ -1,0 +1,19 @@
+{
+  "name": "onerxiv-crud-tutorial",
+  "version": "1.0.0",
+  "description": "A minimal, heavily-commented Express + MongoDB CRUD example for learning.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.5.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

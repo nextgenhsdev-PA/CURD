@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OneRxiv — Patient CRUD Demo</title>
+<style>
+  :root {
+    --ink: #1a1d24;
+    --soft: #5a5f6b;
+    --line: #e3e5e9;
+    --accent: #0f7a6b;
+    --accent-light: #e6f4f1;
+    --danger: #c0392b;
+    --bg: #f7f7f5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 40px 24px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--soft); font-size: 14px; margin-bottom: 28px; }
+  .card {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 14px; }
+  form { display: grid; grid-template-columns: 1.4fr 0.7fr 1.3fr 1.4fr auto; gap: 10px; align-items: end; }
+  label { display: block; font-size: 12px; color: var(--soft); margin-bottom: 4px; }
+  input {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: #0b5b50; }
+  .btn-ghost { background: transparent; color: var(--soft); border: 1px solid var(--line); }
+  .btn-ghost:hover { background: #f0f0ee; }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid #f0d5d1; }
+  .btn-danger:hover { background: #fdf1ef; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  .actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .actions button { padding: 6px 10px; font-size: 12px; }
+  .pill {
+    display: inline-block;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  #status { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  #status.error { color: var(--danger); }
+  #status.ok { color: var(--accent); }
+  .empty { color: var(--soft); font-size: 14px; padding: 24px 0; text-align: center; }
+  .edit-input { padding: 5px 7px; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; width: 100%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>OneRxiv — Patient Records (Demo)</h1>
+  <div class="sub">Live CRUD against MongoDB Atlas via the Express API. Add, edit, or delete a patient and watch the table update.</div>
+
+  <div class="card">
+    <h2>Add a patient</h2>
+    <form id="add-form">
+      <div>
+        <label>Name</label>
+        <input type="text" id="f-name" required />
+      </div>
+      <div>
+        <label>Age</label>
+        <input type="number" id="f-age" min="0" required />
+      </div>
+      <div>
+        <label>Condition</label>
+        <input type="text" id="f-condition" />
+      </div>
+      <div>
+        <label>Email</label>
+        <input type="email" id="f-email" required />
+      </div>
+      <button type="submit" class="btn-primary">Add patient</button>
+    </form>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Patients (<span id="count">0</span>)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Age</th>
+          <th>Condition</th>
+          <th>Email</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" style="display:none;">No patients yet — add one above, or run <code>node seed.js</code> to load 10 sample patients.</div>
+  </div>
+</div>
+
+<script>
+const API = '/api/patients';
+
+async function loadPatients() {
+  const res = await fetch(API + '?limit=100');
+  const json = await res.json();
+  renderRows(json.data || []);
+}
+
+function renderRows(patients) {
+  const rowsEl = document.getElementById('rows');
+  const emptyEl = document.getElementById('empty');
+  document.getElementById('count').textContent = patients.length;
+
+  if (patients.length === 0) {
+    rowsEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  rowsEl.innerHTML = patients.map(p => `
+    <tr data-id="${p._id}">
+      <td class="cell-name">${escapeHtml(p.name)}</td>
+      <td class="cell-age">${p.age}</td>
+      <td class="cell-condition">${escapeHtml(p.condition || '')}</td>
+      <td class="cell-email">${escapeHtml(p.email)}</td>
+      <td>
+        <div class="actions">
+          <button class="btn-ghost" onclick="startEdit('${p._id}')">Edit</button>
+          <button class="btn-danger" onclick="deletePatient('${p._id}')">Delete</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function setStatus(message, type) {
+  const el = document.getElementById('status');
+  el.textContent = message;
+  el.className = type || '';
+  if (message) setTimeout(() => { el.textContent = ''; el.className = ''; }, 3000);
+}
+
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('f-name').value,
+    age: Number(document.getElementById('f-age').value),
+    condition: document.getElementById('f-condition').value,
+    email: document.getElementById('f-email').value,
+  };
+
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to add patient');
+
+    e.target.reset();
+    setStatus('Patient added.', 'ok');
+    loadPatients();
+  } catch (err) {
+    setStatus(err.message, 'error');
+  }
+});
+
+function startEdit(id) {
+  const row = document.querySelector(`tr[data-id="${id}"]`);
+  const nameCell = row.querySelector('.cell-name');
+  const ageCell = row.querySelector('.cell-age');
+  const conditionCell = row.querySelector('.cell-condition');
+  const emailCell = row.querySelector('.cell-email');
+  const actionsCell = row.querySelector('.actions');
+
+  const currentName = nameCell.textContent;
+  const currentAge = ageCell.textContent;
+  const currentCondition = conditionCell.textContent;
+  const currentEmail = emailCell.textContent;
+
+  nameCell.innerHTML = `<input class="edit-input" value="${currentName}" id="e-name-${id}" />`;
+  ageCell.innerHTML = `<input class="edit-input" type="number" value="${currentAge}" id="e-age-${id}" />`;
+  conditionCell.innerHTML = `<input class="edit-input" value="${currentCondition}" id="e-condition-${id}" />`;
+  emailCell.innerHTML = `<input class="edit-input" value="${currentEmail}" id="e-email-${id}" />`;
+  actionsCell.innerHTML = `
+    <button class="btn-primary" onclick="saveEdit('${id}')">Save</button>
+    <button class="btn-ghost" onclick="loadPatients()">Cancel</button>
+  `;
+}
+
+async function saveEdit(id) {
+  const body = {
+    name: document.getElementById(`e-name-${id}`).value,
+    age: Number(document.getElementById(`e-age-${id}`).value),
+    condition: document.getElementById(`e-condition-${id}`).value,
+    email: document.getElementById(`e-email-${id}`).value,
+  };
+
+  try {
+    const res = await fetch(`${API}/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update patient');
+
+    setStatus('Patient updated.', 'ok');
+    loadPatients();
+  } catch (err) {
+    setStatus(err.message, 'error');
+  }
+}
+
+async function deletePatient(id) {
+  if (!confirm('Delete this patient?')) return;
+  try {
+    const res = await fetch(`${API}/${id}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to delete patient');
+    }
+    setStatus('Patient deleted.', 'ok');
+    loadPatients();
+  } catch (err) {
+    setStatus(err.message, 'error');
+  }
+}
+
+loadPatients();
+</script>
+</body>
+</html>
