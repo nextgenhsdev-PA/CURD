@@ -194,6 +194,9 @@ const entities = {
 };
 
 let activeKey = 'hospitals';
+let editingId = null; // null = "Add" mode; a record's _id = "Edit" mode
+let currentRows = []; // the currently-loaded rows for the active tab, so
+                       // startEdit() can find a record's existing values
 const refCache = {}; // caches hospitals/doctors/nurses lists for populating <select> options
 
 /* ------------------------------------------------------------------ */
@@ -208,6 +211,7 @@ function renderTabs() {
   tabsEl.querySelectorAll('.tab').forEach(btn => {
     btn.addEventListener('click', () => {
       activeKey = btn.dataset.key;
+      editingId = null; // leaving the tab cancels any in-progress edit
       renderTabs();
       renderForm();
       loadRows();
@@ -236,15 +240,30 @@ async function refreshAllRefData() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Form (add)                                                          */
+/* Form (shared by Add and Edit — editingId decides which mode)        */
 /* ------------------------------------------------------------------ */
 
 async function renderForm() {
   const config = entities[activeKey];
-  document.getElementById('form-title').textContent = `Add a ${config.label.slice(0, -1).toLowerCase()}`;
+  const editingRow = editingId ? currentRows.find(r => r._id === editingId) : null;
+
+  document.getElementById('form-title').textContent = editingRow
+    ? `Edit ${config.label.slice(0, -1).toLowerCase()}`
+    : `Add a ${config.label.slice(0, -1).toLowerCase()}`;
+
   const form = document.getElementById('entity-form');
 
   const fieldsHtml = await Promise.all(config.fields.map(async (f) => {
+    // Figure out what value (if any) should be pre-filled when editing.
+    let currentValue = '';
+    if (editingRow) {
+      const raw = editingRow[f.key];
+      // Populated reference fields (hospital/doctor/nurse) come back as
+      // full objects ({_id, name, ...}) from the API, not just an ID —
+      // we need the ID for the <select>, not the whole object.
+      currentValue = raw && typeof raw === 'object' ? raw._id : (raw ?? '');
+    }
+
     if (f.type === 'select') {
       let options = f.options;
       if (f.optionsFrom) {
@@ -258,7 +277,7 @@ async function renderForm() {
           <label>${f.label}</label>
           <select id="f-${f.key}" ${f.required ? 'required' : ''}>
             ${!f.required ? '<option value="">— none —</option>' : ''}
-            ${options.map(o => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('')}
+            ${options.map(o => `<option value="${o.value}" ${String(o.value) === String(currentValue) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
           </select>
         </div>
       `;
@@ -266,12 +285,17 @@ async function renderForm() {
     return `
       <div>
         <label>${f.label}</label>
-        <input type="${f.type}" id="f-${f.key}" ${f.required ? 'required' : ''} ${f.type === 'number' ? 'min="0"' : ''} />
+        <input type="${f.type}" id="f-${f.key}" value="${escapeHtml(currentValue)}" ${f.required ? 'required' : ''} ${f.type === 'number' ? 'min="0"' : ''} />
       </div>
     `;
   }));
 
-  form.innerHTML = fieldsHtml.join('') + `<button type="submit" class="btn-primary">Add</button>`;
+  const buttonsHtml = editingRow
+    ? `<button type="submit" class="btn-primary">Save changes</button>
+       <button type="button" class="btn-ghost" onclick="cancelEdit()">Cancel</button>`
+    : `<button type="submit" class="btn-primary">Add</button>`;
+
+  form.innerHTML = fieldsHtml.join('') + buttonsHtml;
 
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -284,23 +308,33 @@ async function renderForm() {
       body[f.key] = val;
     });
 
+    const isEditing = !!editingId;
+    const url = isEditing ? `${config.api}/${editingId}` : config.api;
+    const method = isEditing ? 'PATCH' : 'POST';
+
     try {
-      const res = await fetch(config.api, {
-        method: 'POST',
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add record');
+      if (!res.ok) throw new Error(data.error || `Failed to ${isEditing ? 'update' : 'add'} record`);
 
-      form.reset();
-      setStatus('Added.', 'ok');
+      setStatus(isEditing ? 'Updated.' : 'Added.', 'ok');
+      editingId = null;
       await refreshAllRefData();
+      await renderForm(); // back to "Add" mode
       loadRows();
     } catch (err) {
       setStatus(err.message, 'error');
     }
   };
+}
+
+function cancelEdit() {
+  editingId = null;
+  renderForm();
 }
 
 /* ------------------------------------------------------------------ */
@@ -311,7 +345,8 @@ async function loadRows() {
   const config = entities[activeKey];
   const res = await fetch(config.api + '?limit=100');
   const json = await res.json();
-  renderTable(json.data || []);
+  currentRows = json.data || [];
+  renderTable(currentRows);
 }
 
 function renderTable(rows) {
@@ -336,11 +371,21 @@ function renderTable(rows) {
       ${config.columns.map(c => `<td>${escapeHtml(String(c.render(r)))}</td>`).join('')}
       <td>
         <div class="actions">
+          <button class="btn-ghost" onclick="startEdit('${r._id}')">Edit</button>
           <button class="btn-danger" onclick="deleteRow('${r._id}')">Delete</button>
         </div>
       </td>
     </tr>
   `).join('');
+}
+
+function startEdit(id) {
+  editingId = id;
+  renderForm();
+  // Scroll the form into view so it's obvious something changed —
+  // helpful since the form is above the table, out of sight when
+  // clicking Edit on a row further down a long list.
+  document.getElementById('entity-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function deleteRow(id) {
@@ -352,8 +397,10 @@ async function deleteRow(id) {
       const data = await res.json();
       throw new Error(data.error || 'Failed to delete');
     }
+    if (editingId === id) editingId = null; // don't leave a stale edit form open
     setStatus('Deleted.', 'ok');
     await refreshAllRefData();
+    await renderForm();
     loadRows();
   } catch (err) {
     setStatus(err.message, 'error');
