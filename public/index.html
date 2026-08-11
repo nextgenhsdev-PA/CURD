@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OneRxiv Care Network</title>
+<style>
+  :root {
+    --ink: #1a1d24;
+    --soft: #5a5f6b;
+    --line: #e3e5e9;
+    --accent: #0f7a6b;
+    --accent-light: #e6f4f1;
+    --danger: #c0392b;
+    --bg: #f7f7f5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 40px 24px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--soft); font-size: 14px; margin-bottom: 24px; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+  .tab {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--soft);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    background: none;
+    border-top: none; border-left: none; border-right: none;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .card {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 14px; }
+  form { display: grid; gap: 10px; align-items: end; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  label { display: block; font-size: 12px; color: var(--soft); margin-bottom: 4px; }
+  input, select {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: #0b5b50; }
+  .btn-ghost { background: transparent; color: var(--soft); border: 1px solid var(--line); }
+  .btn-ghost:hover { background: #f0f0ee; }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid #f0d5d1; }
+  .btn-danger:hover { background: #fdf1ef; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  .actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .actions button { padding: 6px 10px; font-size: 12px; }
+  #status { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  #status.error { color: var(--danger); }
+  #status.ok { color: var(--accent); }
+  .empty { color: var(--soft); font-size: 14px; padding: 24px 0; text-align: center; }
+
+  @media (max-width: 640px) {
+    body { padding: 20px 12px; }
+    form { grid-template-columns: 1fr; }
+    form button { width: 100%; }
+    table { min-width: 640px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>OneRxiv — Care Network (Demo)</h1>
+  <div class="sub">Live CRUD against MongoDB Atlas. Hospitals, doctors, and nurses are linked, and patients are assigned to all three.</div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="card">
+    <h2 id="form-title">Add</h2>
+    <form id="entity-form"></form>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Records (<span id="count">0</span>)</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr id="table-head"></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="empty" class="empty" style="display:none;">
+      No records yet — add one above, or run <code>node seed.js</code> to load sample data.
+    </div>
+  </div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/* Entity configuration — one place that describes every tab           */
+/* ------------------------------------------------------------------ */
+
+const entities = {
+  hospitals: {
+    label: 'Hospitals',
+    api: '/api/hospitals',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text', required: true },
+      { key: 'address', label: 'Address', type: 'text' },
+      { key: 'phone', label: 'Phone', type: 'text' },
+    ],
+    columns: [
+      { label: 'Name', render: (r) => r.name },
+      { label: 'Address', render: (r) => r.address || '' },
+      { label: 'Phone', render: (r) => r.phone || '' },
+    ],
+  },
+  doctors: {
+    label: 'Doctors',
+    api: '/api/doctors',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text', required: true },
+      { key: 'specialty', label: 'Specialty', type: 'text' },
+      { key: 'email', label: 'Email', type: 'email', required: true },
+      { key: 'hospital', label: 'Hospital', type: 'select', optionsFrom: 'hospitals', required: true },
+    ],
+    columns: [
+      { label: 'Name', render: (r) => r.name },
+      { label: 'Specialty', render: (r) => r.specialty || '' },
+      { label: 'Email', render: (r) => r.email },
+      { label: 'Hospital', render: (r) => (r.hospital && r.hospital.name) || '—' },
+    ],
+  },
+  nurses: {
+    label: 'Nurses',
+    api: '/api/nurses',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text', required: true },
+      { key: 'shift', label: 'Shift', type: 'select', options: ['Day', 'Night', 'Rotating'] },
+      { key: 'email', label: 'Email', type: 'email', required: true },
+      { key: 'hospital', label: 'Hospital', type: 'select', optionsFrom: 'hospitals', required: true },
+    ],
+    columns: [
+      { label: 'Name', render: (r) => r.name },
+      { label: 'Shift', render: (r) => r.shift },
+      { label: 'Email', render: (r) => r.email },
+      { label: 'Hospital', render: (r) => (r.hospital && r.hospital.name) || '—' },
+    ],
+  },
+  patients: {
+    label: 'Patients',
+    api: '/api/patients',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text', required: true },
+      { key: 'age', label: 'Age', type: 'number', required: true },
+      { key: 'condition', label: 'Condition', type: 'text' },
+      { key: 'email', label: 'Email', type: 'email', required: true },
+      { key: 'hospital', label: 'Hospital', type: 'select', optionsFrom: 'hospitals' },
+      { key: 'doctor', label: 'Doctor', type: 'select', optionsFrom: 'doctors' },
+      { key: 'nurse', label: 'Nurse', type: 'select', optionsFrom: 'nurses' },
+    ],
+    columns: [
+      { label: 'Name', render: (r) => r.name },
+      { label: 'Age', render: (r) => r.age },
+      { label: 'Condition', render: (r) => r.condition || '' },
+      { label: 'Hospital', render: (r) => (r.hospital && r.hospital.name) || '—' },
+      { label: 'Doctor', render: (r) => (r.doctor && r.doctor.name) || '—' },
+      { label: 'Nurse', render: (r) => (r.nurse && r.nurse.name) || '—' },
+    ],
+  },
+};
+
+let activeKey = 'hospitals';
+const refCache = {}; // caches hospitals/doctors/nurses lists for populating <select> options
+
+/* ------------------------------------------------------------------ */
+/* Tabs                                                                */
+/* ------------------------------------------------------------------ */
+
+function renderTabs() {
+  const tabsEl = document.getElementById('tabs');
+  tabsEl.innerHTML = Object.keys(entities).map(key => `
+    <button class="tab ${key === activeKey ? 'active' : ''}" data-key="${key}">${entities[key].label}</button>
+  `).join('');
+  tabsEl.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeKey = btn.dataset.key;
+      renderTabs();
+      renderForm();
+      loadRows();
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Reference data (for populating <select> dropdowns)                  */
+/* ------------------------------------------------------------------ */
+
+async function loadRefData(key) {
+  if (refCache[key]) return refCache[key];
+  const res = await fetch(entities[key].api + '?limit=100');
+  const json = await res.json();
+  refCache[key] = json.data || [];
+  return refCache[key];
+}
+
+async function refreshAllRefData() {
+  await Promise.all(['hospitals', 'doctors', 'nurses'].map(async (k) => {
+    const res = await fetch(entities[k].api + '?limit=100');
+    const json = await res.json();
+    refCache[k] = json.data || [];
+  }));
+}
+
+/* ------------------------------------------------------------------ */
+/* Form (add)                                                          */
+/* ------------------------------------------------------------------ */
+
+async function renderForm() {
+  const config = entities[activeKey];
+  document.getElementById('form-title').textContent = `Add a ${config.label.slice(0, -1).toLowerCase()}`;
+  const form = document.getElementById('entity-form');
+
+  const fieldsHtml = await Promise.all(config.fields.map(async (f) => {
+    if (f.type === 'select') {
+      let options = f.options;
+      if (f.optionsFrom) {
+        const data = await loadRefData(f.optionsFrom);
+        options = data.map(d => ({ value: d._id, label: d.name }));
+      } else if (Array.isArray(options)) {
+        options = options.map(o => ({ value: o, label: o }));
+      }
+      return `
+        <div>
+          <label>${f.label}</label>
+          <select id="f-${f.key}" ${f.required ? 'required' : ''}>
+            ${!f.required ? '<option value="">— none —</option>' : ''}
+            ${options.map(o => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('')}
+          </select>
+        </div>
+      `;
+    }
+    return `
+      <div>
+        <label>${f.label}</label>
+        <input type="${f.type}" id="f-${f.key}" ${f.required ? 'required' : ''} ${f.type === 'number' ? 'min="0"' : ''} />
+      </div>
+    `;
+  }));
+
+  form.innerHTML = fieldsHtml.join('') + `<button type="submit" class="btn-primary">Add</button>`;
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = {};
+    config.fields.forEach(f => {
+      const el = document.getElementById(`f-${f.key}`);
+      let val = el.value;
+      if (f.type === 'number') val = Number(val);
+      if (f.type === 'select' && val === '') val = undefined;
+      body[f.key] = val;
+    });
+
+    try {
+      const res = await fetch(config.api, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add record');
+
+      form.reset();
+      setStatus('Added.', 'ok');
+      await refreshAllRefData();
+      loadRows();
+    } catch (err) {
+      setStatus(err.message, 'error');
+    }
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Table (list / edit / delete)                                        */
+/* ------------------------------------------------------------------ */
+
+async function loadRows() {
+  const config = entities[activeKey];
+  const res = await fetch(config.api + '?limit=100');
+  const json = await res.json();
+  renderTable(json.data || []);
+}
+
+function renderTable(rows) {
+  const config = entities[activeKey];
+  document.getElementById('count').textContent = rows.length;
+
+  const headEl = document.getElementById('table-head');
+  headEl.innerHTML = config.columns.map(c => `<th>${c.label}</th>`).join('') + '<th></th>';
+
+  const rowsEl = document.getElementById('rows');
+  const emptyEl = document.getElementById('empty');
+
+  if (rows.length === 0) {
+    rowsEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  rowsEl.innerHTML = rows.map(r => `
+    <tr data-id="${r._id}">
+      ${config.columns.map(c => `<td>${escapeHtml(String(c.render(r)))}</td>`).join('')}
+      <td>
+        <div class="actions">
+          <button class="btn-danger" onclick="deleteRow('${r._id}')">Delete</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteRow(id) {
+  if (!confirm('Delete this record?')) return;
+  const config = entities[activeKey];
+  try {
+    const res = await fetch(`${config.api}/${id}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to delete');
+    }
+    setStatus('Deleted.', 'ok');
+    await refreshAllRefData();
+    loadRows();
+  } catch (err) {
+    setStatus(err.message, 'error');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function setStatus(message, type) {
+  const el = document.getElementById('status');
+  el.textContent = message;
+  el.className = type || '';
+  if (message) setTimeout(() => { el.textContent = ''; el.className = ''; }, 3000);
+}
+
+/* ------------------------------------------------------------------ */
+/* Init                                                                */
+/* ------------------------------------------------------------------ */
+
+(async function init() {
+  await refreshAllRefData();
+  renderTabs();
+  await renderForm();
+  loadRows();
+})();
+</script>
+</body>
+</html>
